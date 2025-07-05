@@ -1,7 +1,7 @@
 use iced::Settings;
 use iced::keyboard;
 use iced::time;
-use iced::widget::{column, text, text_editor};
+use iced::widget::{column, row, text, text_editor};
 use iced::window;
 use iced::window::Id;
 use iced::window::Mode;
@@ -36,15 +36,18 @@ struct Editor {
     content: text_editor::Content,
     is_loading: bool,
     is_dirty: bool,
+    current_time: String,
 }
 
 impl Default for Editor {
     fn default() -> Self {
+        let now = Local::now();
         Self {
             file: None,
             content: text_editor::Content::new(),
             is_loading: true,
             is_dirty: false,
+            current_time: now.format("%H:%M").to_string(),
         }
     }
 }
@@ -61,6 +64,7 @@ enum Message {
     OpenNextFile,
     CreateNewFile,
     FileLoaded(Result<(PathBuf, String), Error>),
+    TimeUpdate,
 }
 
 impl Editor {
@@ -74,6 +78,7 @@ impl Editor {
             content: text_editor::Content::new(),
             is_loading: true,
             is_dirty: false,
+            current_time: now.format("%H:%M").to_string(),
         };
 
         let tasks = vec![
@@ -198,11 +203,16 @@ impl Editor {
             Message::WindowOpened(id) => {
                 Task::batch(vec![window::change_mode(id, Mode::Fullscreen)])
             }
+            Message::TimeUpdate => {
+                let now = Local::now();
+                self.current_time = now.format("%H:%M").to_string();
+                Task::none()
+            }
         }
     }
 
     fn view(&self) -> Element<Message> {
-        let status_text = if let Some(path) = &self.file {
+        let status_left = if let Some(path) = &self.file {
             format!(
                 "File: {} | {}:{} | Cmd+L: Prev | Cmd+P: Next | Cmd+N: New | Cmd+S: Save | ESC: Exit",
                 path.display(),
@@ -216,6 +226,11 @@ impl Editor {
                 self.content.cursor_position().1 + 1
             )
         };
+
+        let status_bar = row![
+            text(status_left).width(Fill),
+            text(&self.current_time)
+        ];
 
         column![
             text_editor(&self.content)
@@ -242,7 +257,7 @@ impl Editor {
                         _ => text_editor::Binding::from_key_press(key_press),
                     }
                 }),
-            text(status_text),
+            status_bar,
         ]
         .spacing(10)
         .padding(10)
@@ -256,6 +271,7 @@ impl Editor {
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
             time::every(Duration::from_secs(10)).map(|_| Message::AutoSave),
+            time::every(Duration::from_secs(1)).map(|_| Message::TimeUpdate),
             window::close_events().map(|_| Message::WindowClosed),
             window::open_events().map(Message::WindowOpened),
         ])
