@@ -257,7 +257,7 @@ impl Editor {
         Subscription::batch([
             time::every(Duration::from_secs(10)).map(|_| Message::AutoSave),
             window::close_events().map(|_| Message::WindowClosed),
-            window::open_events().map(|id| Message::WindowOpened(id)),
+            window::open_events().map(Message::WindowOpened),
         ])
     }
 }
