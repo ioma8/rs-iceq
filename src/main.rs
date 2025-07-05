@@ -1,24 +1,28 @@
+use iced::Settings;
 use iced::keyboard;
 use iced::time;
 use iced::widget::{column, text, text_editor};
 use iced::window;
+use iced::window::Id;
 use iced::window::Mode;
 use iced::{Element, Fill, Font, Subscription, Task, Theme};
+
+use chrono::Local;
 
 use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
-
-use chrono::Local;
 
 pub fn main() -> iced::Result {
     iced::application("Distraction-Free Editor", Editor::update, Editor::view)
         .theme(Editor::theme)
         .default_font(Font::MONOSPACE)
         .subscription(Editor::subscription)
+        .settings(Settings::default())
         .window(window::Settings {
             size: iced::Size::new(800.0, 600.0),
             resizable: true,
+            visible: false,
             decorations: false,
             transparent: false,
             ..Default::default()
@@ -51,6 +55,7 @@ enum Message {
     FileCreated(Result<PathBuf, Error>),
     AutoSave,
     FileSaved(Result<PathBuf, Error>),
+    WindowOpened(Id),
     WindowClosed,
     OpenPreviousFile,
     OpenNextFile,
@@ -72,9 +77,8 @@ impl Editor {
         };
 
         let tasks = vec![
-            window::get_latest()
-                .and_then(move |window| window::change_mode(window, Mode::Fullscreen)),
             Task::perform(create_new_file(file_path), Message::FileCreated),
+            iced::widget::focus_next(),
         ];
 
         (editor, Task::batch(tasks))
@@ -130,13 +134,11 @@ impl Editor {
                     } else {
                         Task::none()
                     };
-                    
+
                     let current_file = self.file.clone();
-                    let load_task = Task::perform(
-                        find_and_load_file(current_file, true),
-                        Message::FileLoaded,
-                    );
-                    
+                    let load_task =
+                        Task::perform(find_and_load_file(current_file, true), Message::FileLoaded);
+
                     Task::batch([save_task, load_task])
                 }
             }
@@ -151,13 +153,11 @@ impl Editor {
                     } else {
                         Task::none()
                     };
-                    
+
                     let current_file = self.file.clone();
-                    let load_task = Task::perform(
-                        find_and_load_file(current_file, false),
-                        Message::FileLoaded,
-                    );
-                    
+                    let load_task =
+                        Task::perform(find_and_load_file(current_file, false), Message::FileLoaded);
+
                     Task::batch([save_task, load_task])
                 }
             }
@@ -172,16 +172,17 @@ impl Editor {
                     } else {
                         Task::none()
                     };
-                    
+
                     let now = Local::now();
                     let filename = format!("{}.txt", now.format("%Y-%m-%d_%H-%M-%S"));
                     let file_path = PathBuf::from(filename);
-                    let create_task = Task::perform(create_new_file(file_path), Message::FileCreated);
-                    
+                    let create_task =
+                        Task::perform(create_new_file(file_path), Message::FileCreated);
+
                     // Clear current content
                     self.content = text_editor::Content::new();
                     self.is_dirty = false;
-                    
+
                     Task::batch([save_task, create_task])
                 }
             }
@@ -193,6 +194,9 @@ impl Editor {
                     self.is_dirty = false;
                 }
                 Task::none()
+            }
+            Message::WindowOpened(id) => {
+                Task::batch(vec![window::change_mode(id, Mode::Fullscreen)])
             }
         }
     }
@@ -253,6 +257,7 @@ impl Editor {
         Subscription::batch([
             time::every(Duration::from_secs(10)).map(|_| Message::AutoSave),
             window::close_events().map(|_| Message::WindowClosed),
+            window::open_events().map(|id| Message::WindowOpened(id)),
         ])
     }
 }
@@ -284,12 +289,16 @@ async fn save_file(path: Option<PathBuf>, contents: String) -> Result<PathBuf, E
     Ok(path)
 }
 
-async fn find_and_load_file(current_file: Option<PathBuf>, find_previous: bool) -> Result<(PathBuf, String), Error> {
+async fn find_and_load_file(
+    current_file: Option<PathBuf>,
+    find_previous: bool,
+) -> Result<(PathBuf, String), Error> {
     use std::fs;
-    
+
     // Get current directory
-    let current_dir = std::env::current_dir().map_err(|_| Error::IoError(io::ErrorKind::NotFound))?;
-    
+    let current_dir =
+        std::env::current_dir().map_err(|_| Error::IoError(io::ErrorKind::NotFound))?;
+
     // Get all .txt files in current directory
     let mut txt_files: Vec<PathBuf> = fs::read_dir(&current_dir)
         .map_err(|_| Error::IoError(io::ErrorKind::NotFound))?
@@ -303,21 +312,21 @@ async fn find_and_load_file(current_file: Option<PathBuf>, find_previous: bool) 
             }
         })
         .collect();
-    
+
     // Sort files by name
     txt_files.sort();
-    
+
     if txt_files.is_empty() {
         return Err(Error::IoError(io::ErrorKind::NotFound));
     }
-    
+
     // Find current file index
     let current_index = if let Some(current) = current_file {
         txt_files.iter().position(|p| p == &current)
     } else {
         None
     };
-    
+
     // Find target file
     let target_path = match current_index {
         Some(index) => {
@@ -350,11 +359,11 @@ async fn find_and_load_file(current_file: Option<PathBuf>, find_previous: bool) 
             txt_files[0].clone()
         }
     };
-    
+
     // Load the target file
     let contents = tokio::fs::read_to_string(&target_path)
         .await
         .map_err(|error| Error::IoError(error.kind()))?;
-    
+
     Ok((target_path, contents))
 }
